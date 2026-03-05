@@ -1,0 +1,30 @@
+# IDE
+.idea/
+.vscode/
+.clangd
+
+# Build directories (ignore everywhere)
+build/
+*/build/
+
+# CMake generated
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Tags
+TAGS
+
+# Object files
+*.o
+*.obj
+
+# Executables
+*.out
+*.exe
+
+
+
+
