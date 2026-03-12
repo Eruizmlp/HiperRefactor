@@ -9,7 +9,6 @@
 #include "hl_Core.h"
 #include "Block_Map.h" 
 #include "GenericFieldStruct.h" 
-#include "GhostManager.h" 
 
 int main(int argc, char** argv) 
 {
@@ -21,7 +20,7 @@ int main(int argc, char** argv)
     int nProcs = NumProcs();
 
     if (myRank == 0) {
-        std::cout << "=== STARTING HIPERLIFE DEMO ===" << std::endl;
+        std::cout << "=== TEST 1: CAMPOS Y MULTI-FIELDS ===" << std::endl;
         std::cout << "Running on " << nProcs << " processors.\n" << std::endl;
     }
 
@@ -34,12 +33,12 @@ int main(int argc, char** argv)
         distributedData = {myRank};     
     }
 
-    // --- Explicit Map & Vector Initialization ---
-    if (myRank == 0) std::cout << "--- Case 1: Explicit Map & Vector ---" << std::endl;
-
     BlockMap myBlockMap("MyMap", MpiComm());
     myBlockMap.setLocNItem(distributedData.size());
     myBlockMap.Update(); 
+
+    // --- Case 1: Explicit Map & Vector Initialization ---
+    if (myRank == 0) std::cout << "\n--- Case 1: Explicit Map & Vector ---" << std::endl;
 
     GenericFieldStruct<int> fieldExplicit("FieldExplicit", MpiComm());
     fieldExplicit.setBlockMap(myBlockMap);
@@ -51,7 +50,7 @@ int main(int argc, char** argv)
     std::cout << "Rank " << myRank << " [Explicit]: Local[0] = " << val0 << std::endl;
     MPI_Barrier(MpiComm());
 
-    // --- AutoMap from Vector ---
+    // --- Case 2: AutoMap from Vector ---
     if (myRank == 0) std::cout << "\n--- Case 2: AutoMap from Vector ---" << std::endl;
 
     GenericFieldStruct<int> fieldAuto("FieldAuto", MpiComm());
@@ -66,7 +65,7 @@ int main(int argc, char** argv)
     }
     MPI_Barrier(MpiComm());
 
-    // --- Global Scatter ---
+    // --- Case 3: Global Scatter ---
     if (myRank == 0) std::cout << "\n--- Case 3: Global Scatter ---" << std::endl;
 
     std::vector<int> globalData;
@@ -90,7 +89,7 @@ int main(int argc, char** argv)
     std::cout << std::endl;
     MPI_Barrier(MpiComm());
 
-    // --- Raw Pointers & Multi-Field ---
+    // --- Case 4: Raw Pointers & Multi-Field ---
     if (myRank == 0) std::cout << "\n--- Case 4: Raw Pointer & Multi-Fields ---" << std::endl;
 
     int numFlds = 3;
@@ -113,7 +112,7 @@ int main(int argc, char** argv)
     }
     MPI_Barrier(MpiComm());
 
-    // --- Modifiers ---
+    // --- Case 5: Modifiers ---
     if (myRank == 0) std::cout << "\n--- Case 5: Modifiers ---" << std::endl;
 
     if (nProcs > 1) {
@@ -127,73 +126,8 @@ int main(int argc, char** argv)
         }
     }
     MPI_Barrier(MpiComm());
-    
-    // --- GhostManager Topology Evaluation ---
-    if (myRank == 0) std::cout << "\n--- Case 6: GhostManager Topology Test ---" << std::endl;
-
-    std::vector<int> candidates;
-    if (myRank == 0) {
-        if (nProcs > 1) candidates = {4, 1, 5, 4}; 
-    } else if (myRank == 1) {
-        candidates = {3, 0};
-    } else if (myRank == 2) {
-        candidates = {5};
-    }
-
-    GhostManager ghostMgr("TestGhostMgr", MpiComm());
-    ghostMgr.setBlockMap(myBlockMap);
-    ghostMgr.setGhostLists(candidates);
-    ghostMgr.Update();
-
-    const auto& cleanGhosts = ghostMgr.getGhosts();
-    std::cout << "Rank " << myRank << " [GhostMgr]: Clean Ghosts List = { ";
-    for (int g : cleanGhosts) std::cout << g << " ";
-    std::cout << "}" << std::endl;
-
-    const auto& sendMap = ghostMgr.getSendMap();
-    for (const auto& pair : sendMap) {
-        std::cout << "Rank " << myRank << " [GhostMgr]: Will send my LOCAL nodes { ";
-        for (int lid : pair.second) std::cout << lid << " ";
-        std::cout << "} to Rank " << pair.first << std::endl;
-    }
-    MPI_Barrier(MpiComm());
-
-    // --- Ghost Data Communication ---
-    if (myRank == 0) std::cout << "\n--- Case 7: Topology + Communication Test ---" << std::endl;
-
-    std::vector<double> values(MyRank()*2);
-    for (int i = 0; i < values.size(); ++i) {
-        //int globalID = myBlockMap.myOffset() + i;
-        values[i] = i%10 + 100*MyRank();
-    }
-
-
-    GenericFieldStruct<double> commField("CommField", MpiComm());
-    commField.setDistFields(values);
-    commField.setLocNItem(myBlockMap.loc_nItem());
-    commField.setNFlds(1);
-    commField.Update();
-
-    commField.UpdateGhosts(candidates); 
-
-    if (nProcs > 1) {
-        if (myRank == 0) {
-            double ghostVal4 = commField.getValue(0, 4, IndexType::Global);
-            std::cout << "Rank 0 [Initial Sync]: Read Global 4 = " << ghostVal4 << " (Expected 104)" << std::endl;
-        } else if (myRank == 1) {
-            double ghostVal0 = commField.getValue(0, 0, IndexType::Global);
-            std::cout << "Rank 1 [Initial Sync]: Read Global 0 = " << ghostVal0 << " (Expected 100)" << std::endl;
-        }
-    }
-    MPI_Barrier(MpiComm());
-
-    if (myRank == 0) {
-        std::cout << "\nVisualizing Distributed Field State (After Topology + Comm):" << std::endl;
-    }
-    
-    std::cout << commField; 
-    MPI_Barrier(MpiComm());
 
     Finalize();
     return 0;
 }
+
