@@ -102,6 +102,6 @@ void GhostIE<T>::communicate(const GhostManager& manager,
     }
 }
 
-} // namespace hiperlife
+}
 
-#endif // GHOSTIE_IMPL_H
+#endif 

@@ -52,7 +52,7 @@ void GenericFieldStruct<T>::UpdateGhosts() {
 template <typename T>
 void GenericFieldStruct<T>::setBlockMap(const BlockMap map) {
     if(!_data.empty()) {
-        hiperlife::Abort("GenericFieldStruct: Cannot set map after data is allocated.");
+        hiperlife::Abort(" Cannot set map after data is allocated.");
     }
     _map = map; 
     _mapIsSet = true;
@@ -91,7 +91,7 @@ void GenericFieldStruct<T>::setValue(int fieldIdx, T value) {
 
 template <typename T>
 void GenericFieldStruct<T>::setFieldName(int idx, std::string name) {
-    if (idx < 0 || idx >= _numFlds) hiperlife::Abort("GenericFieldStruct: Index out of bounds for tag.");
+    if (idx < 0 || idx >= _numFlds) hiperlife::Abort("Index out of bounds for tag.");
     _tagToIndex[name] = idx;
     if ((int)_fieldTags.size() <= idx) _fieldTags.resize(idx+1);
     _fieldTags[idx] = name;
@@ -130,14 +130,7 @@ void GenericFieldStruct<T>::setGlobFields(T* fields) {
 template <typename T>
 void GenericFieldStruct<T>::Update() {
     if (!_mapIsSet) { 
-        if (_tmp_distVector != nullptr) {
-            int inferredSize = _tmp_distVector->size();
-            if (_numFlds > 0) inferredSize /= _numFlds;
-            _map.setLocNItem(inferredSize);
-        }
-        _map.Update(); 
-        _mapIsSet = true;
-        _ghostManager.setBlockMap(_map);
+        hiperlife::Abort("BlockMap has not been set. Use setBlockMap() before calling Update().");
     }
 
     const int nLoc = _map.loc_nItem(); 
@@ -152,7 +145,10 @@ void GenericFieldStruct<T>::Update() {
     }
     else if (_tmp_distVector != nullptr) {
          if ((int)_tmp_distVector->size() != totalSize) {
-             hiperlife::Abort("GenericFieldStruct: Vector size mismatch in Update().");
+             hiperlife::Abort("Dimension mismatch. Input vector size is " + 
+                              std::to_string(_tmp_distVector->size()) + 
+                              ", but expected locNItem (" + std::to_string(nLoc) + 
+                              ") * numFlds (" + std::to_string(_numFlds) + ") = " + std::to_string(totalSize) + ".");
          }
          _data = *_tmp_distVector; 
     }
@@ -184,7 +180,7 @@ void GenericFieldStruct<T>::setValue(int fieldIdx, int idx, IndexType type, T va
 
     if (type == IndexType::Local) {
         int flatIdx = (idx * _numFlds) + fieldIdx;
-        if (flatIdx >= (int)_data.size()) hiperlife::Abort("GenericFieldStruct: Local index out of bounds.");
+        if (flatIdx >= (int)_data.size()) hiperlife::Abort("Local index out of bounds.");
         _data[flatIdx] = value;
         return;
     }
@@ -205,14 +201,14 @@ void GenericFieldStruct<T>::setValue(int fieldIdx, int idx, IndexType type, T va
             int flatIdx = (ghostIdx * _numFlds) + fieldIdx;
             
             if (flatIdx >= (int)_ghostData.size()) {
-                 hiperlife::Abort("GenericFieldStruct: Writing to unallocated ghost. Call UpdateGhosts first.");
+                 hiperlife::Abort("Writing to unallocated ghost. Call UpdateGhosts first.");
             }
             
             _ghostData[flatIdx] = value; 
             return;
         }
     }
-    hiperlife::Abort("GenericFieldStruct::setValue - Global Index " + std::to_string(idx) + " not found locally or in ghosts.");
+    hiperlife::Abort("setValue - Global Index " + std::to_string(idx) + " not found locally or in ghosts.");
 }
 
 template <typename T>
@@ -222,7 +218,7 @@ T GenericFieldStruct<T>::getValue(int fieldIdx, int idx, IndexType type) const {
     
     if (type == IndexType::Local) {
         int flatIdx = (idx * _numFlds) + fieldIdx;
-        if (flatIdx >= (int)_data.size()) hiperlife::Abort("GenericFieldStruct: Local index out of bounds.");
+        if (flatIdx >= (int)_data.size()) hiperlife::Abort("Local index out of bounds.");
         return _data[flatIdx];
     }
 
@@ -241,12 +237,12 @@ T GenericFieldStruct<T>::getValue(int fieldIdx, int idx, IndexType type) const {
             int flatIdx = (ghostIdx * _numFlds) + fieldIdx;
             
             if (flatIdx >= (int)_ghostData.size()) {
-                hiperlife::Abort("GenericFieldStruct: Ghost data not allocated. Call UpdateGhosts first.");
+                hiperlife::Abort("Ghost data not allocated. Call UpdateGhosts first.");
             }
             return _ghostData[flatIdx]; 
         }
     }
-    hiperlife::Abort("GenericFieldStruct::getValue - Global Index " + std::to_string(idx) + " not found locally or in ghosts.");
+    hiperlife::Abort("getValue - Global Index " + std::to_string(idx) + " not found locally or in ghosts.");
     return T(); 
 }
 
