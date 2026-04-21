@@ -41,6 +41,8 @@ void GenericFieldStruct<T>::UpdateGhosts(const std::vector<int>& candidates) {
     _ghostManager.Update();
 
     _ghostData.resize(_ghostManager.getGhosts().size() * _numFlds);
+    _ghostIE.setupImportExport(_ghostManager, _numFlds);
+    
     UpdateGhosts();
 }
 
@@ -105,32 +107,42 @@ int GenericFieldStruct<T>::getFieldIndex(const std::string& name) const {
 }
 
 template <typename T>
-void GenericFieldStruct<T>::setDistFields(T* fields, int locNItem) {
+void GenericFieldStruct<T>::setDistFields(T* fields, int locNItem, DataLayout layout) {
     _tmp_distFields = fields;   
     _map.setLocNItem(locNItem); 
     _tmp_distVector = nullptr;
     _tmp_globFields = nullptr;
+    _tmp_layout = layout; 
 }
 
 template <typename T>
-void GenericFieldStruct<T>::setDistFields(const std::vector<T>& fields) {
+void GenericFieldStruct<T>::setDistFields(const std::vector<T>& fields, DataLayout layout) {
     _tmp_distVector = &fields;
     _tmp_distFields = nullptr;
     _tmp_globFields = nullptr;
+    _tmp_layout = layout; 
 }
 
 template <typename T>
-void GenericFieldStruct<T>::setGlobFields(T* fields) {
+void GenericFieldStruct<T>::setGlobFields(T* fields, DataLayout layout) {
     _tmp_globFields = fields;
     _initFromGlobal = true;
     _tmp_distFields = nullptr;
     _tmp_distVector = nullptr;
+    _tmp_layout = layout;
 }
 
 template <typename T>
 void GenericFieldStruct<T>::Update() {
     if (!_mapIsSet) { 
-        hiperlife::Abort("BlockMap has not been set. Use setBlockMap() before calling Update().");
+        if (_tmp_distVector != nullptr) {
+            int inferredSize = _tmp_distVector->size();
+            if (_numFlds > 0) inferredSize /= _numFlds;
+            _map.setLocNItem(inferredSize);
+        }
+        _map.Update(); 
+        _mapIsSet = true;
+        _ghostManager.setBlockMap(_map);
     }
 
     const int nLoc = _map.loc_nItem(); 
@@ -140,20 +152,30 @@ void GenericFieldStruct<T>::Update() {
         _data.assign(totalSize, T());
     }
 
+    // Transpose SoA to internal AoS if necessary 
+    auto packToAoS = [&](const T* sourceData) {
+        if (_tmp_layout == DataLayout::AoS) {
+            std::copy(sourceData, sourceData + totalSize, _data.begin());
+        } else { // Handle SoA
+            for (int i = 0; i < nLoc; ++i) {
+                for (int f = 0; f < _numFlds; ++f) {
+                    _data[i * _numFlds + f] = sourceData[f * nLoc + i];
+                }
+            }
+        }
+    };
+
     if (_tmp_distFields != nullptr) {
-        std::copy(_tmp_distFields, _tmp_distFields + totalSize, _data.begin());
+        packToAoS(_tmp_distFields);
     }
     else if (_tmp_distVector != nullptr) {
          if ((int)_tmp_distVector->size() != totalSize) {
-             hiperlife::Abort("Dimension mismatch. Input vector size is " + 
-                              std::to_string(_tmp_distVector->size()) + 
-                              ", but expected locNItem (" + std::to_string(nLoc) + 
-                              ") * numFlds (" + std::to_string(_numFlds) + ") = " + std::to_string(totalSize) + ".");
+             hiperlife::Abort("GenericFieldStruct: Vector size mismatch in Update().");
          }
-         _data = *_tmp_distVector; 
+         packToAoS(_tmp_distVector->data());
     }
     else if (_initFromGlobal) {
-        _performScatter();
+        _performScatter(); 
     }
 }
 
@@ -245,42 +267,48 @@ T GenericFieldStruct<T>::getValue(int fieldIdx, int idx, IndexType type) const {
     hiperlife::Abort("getValue - Global Index " + std::to_string(idx) + " not found locally or in ghosts.");
     return T(); 
 }
-
 template <typename T>
 void GenericFieldStruct<T>::_performScatter() {
     std::vector<int> counts = _map.getCounts(); 
     std::vector<int> offsets = _map.getOffsets(); 
-    
-    int nodeBlockSize = _numFlds * sizeof(T);
-    
-    for(auto& c : counts) c *= nodeBlockSize;
-    for(auto& o : offsets) o *= nodeBlockSize;
+    int nLoc = _map.loc_nItem();
 
-    int nLocBytes = _map.loc_nItem() * nodeBlockSize; 
+    if (_tmp_layout == DataLayout::AoS) {
+        int nodeBlockSize = _numFlds * sizeof(T);
+        for(auto& c : counts) c *= nodeBlockSize;
+        for(auto& o : offsets) o *= nodeBlockSize;
 
-    const void* sendbuf = nullptr;
-    if (this->_myRank == 0) {
-        if (_tmp_globFields == nullptr) {
-            hiperlife::Abort("Rank 0: Global data pointer is null in _performScatter.");
+        const void* sendbuf = (this->_myRank == 0) ? reinterpret_cast<const void*>(_tmp_globFields) : nullptr;
+        
+        MPI_Scatterv(sendbuf, counts.data(), offsets.data(), MPI_BYTE, 
+                     _data.data(), nLoc * nodeBlockSize, MPI_BYTE, 
+                     0, this->_comm);
+    } 
+    else {
+        std::vector<T> recvBuffer(nLoc); // Temp buffer for a single field
+        int totalGlobalItems = _map.nItem();
+
+        for (int f = 0; f < _numFlds; ++f) {
+            const T* sendbuf = nullptr;
+            if (this->_myRank == 0) {
+                sendbuf = _tmp_globFields + (f * totalGlobalItems);
+            }
+
+            std::vector<int> fieldCounts = counts;
+            std::vector<int> fieldOffsets = offsets;
+            for(auto& c : fieldCounts) c *= sizeof(T);
+            for(auto& o : fieldOffsets) o *= sizeof(T);
+
+            MPI_Scatterv(sendbuf, fieldCounts.data(), fieldOffsets.data(), MPI_BYTE, 
+                         recvBuffer.data(), nLoc * sizeof(T), MPI_BYTE, 
+                         0, this->_comm);
+
+            for (int i = 0; i < nLoc; ++i) {
+                _data[i * _numFlds + f] = recvBuffer[i];
+            }
         }
-        sendbuf = reinterpret_cast<const void*>(_tmp_globFields);
     }
-    
-    void* recvbuf = reinterpret_cast<void*>(_data.data());
-
-    MPI_Scatterv(
-        sendbuf,            
-        counts.data(),      
-        offsets.data(),     
-        MPI_BYTE,           
-        recvbuf,            
-        nLocBytes,          
-        MPI_BYTE,           
-        0,                  
-        this->_comm               
-    );
 }
-
-} 
+};
 
 #endif 

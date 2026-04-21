@@ -80,7 +80,7 @@ SmartPtr<GenericFieldStruct<int>> CreateFieldNew(int numFields, std::vector<int>
 
     auto fieldExplicit = Create<GenericFieldStruct<int>>("FieldExplicit", MpiComm());
     fieldExplicit->setBlockMap(myBlockMap);
-    fieldExplicit->setDistFields(distributedData);
+    fieldExplicit->setDistFields(distributedData, DataLayout::SoA);
     fieldExplicit->setNFlds(numFields);
     fieldExplicit->Update();
 
@@ -110,7 +110,7 @@ int main(int argc, char** argv)
     using namespace hiperlife;
 
     const int numFields = 2;
-    const int numItemsPerCore = 100;
+    const int numItemsPerCore = 10000;
 
     Init(argc, argv);
 
@@ -128,14 +128,16 @@ int main(int argc, char** argv)
     timer::stop("NewCreateGhostSt");
 
     timer::start("NewCommGhost");
-    fieldExplicit->UpdateGhosts();
+    for (int iter = 0; iter < 1000; ++iter) {
+        fieldExplicit->UpdateGhosts();
+    }
     timer::stop("NewCommGhost");
     if (VerboseRank()) std::cout << "New field" << std::endl;
     GlobalBarrier();
     bool ok = checkGhosts(fieldExplicit.get(), 0, listGhosts);
-    //if (!ok) {
-    //    hiperlife::Abort("Ghost values in new field do not match expected values.");
-    //}
+    if (!ok) {
+        hiperlife::Abort("Ghost values in new field do not match expected values.");
+    }
     GlobalBarrier();
 
     timer::start("OldUpdate");
@@ -147,20 +149,22 @@ int main(int argc, char** argv)
     timer::stop("OldCreateGhostSt");
 
     timer::start("OldCommGhost");
-    oldField->UpdateGhosts();
+    for (int iter = 0; iter < 1000; ++iter) {
+        oldField->UpdateGhosts();
+    }
     timer::stop("OldCommGhost");
     if (VerboseRank()) std::cout << "oldField" << std::endl;
     GlobalBarrier();
     ok = checkGhosts(oldField.get(), 0, listGhosts);
     GlobalBarrier();
-    //if (!ok) {
-    //    hiperlife::Abort("Ghost values in old field do not match expected values.");
-    //}
+    if (!ok) {
+        hiperlife::Abort("Ghost values in old field do not match expected values.");
+    }
 
     hiperlife::GlobalBarrier();
 
-    std::cout << *fieldExplicit << std::endl;
-    std::cout << *oldField << std::endl;
+    // std::cout << *fieldExplicit << std::endl;
+    // std::cout << *oldField << std::endl;
 
     hiperlife::GlobalBarrier();
 
@@ -176,4 +180,3 @@ int main(int argc, char** argv)
     Finalize();
     return 0;
 }
-

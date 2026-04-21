@@ -20,4 +20,7 @@ target_link_libraries(test_Ghosts EmptyApp_GenericField)
 add_executable(test_Mesh tests/test_Mesh.cpp)
 target_link_libraries(test_Mesh EmptyApp_GenericField)
 
+add_executable(test_hlComparison tests/test_hlComparison.cpp)
+target_link_libraries(test_hlComparison EmptyApp_GenericField)
+
 install(TARGETS test_Fields test_Ghosts DESTINATION apps)

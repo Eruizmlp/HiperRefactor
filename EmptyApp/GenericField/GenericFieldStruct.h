@@ -13,6 +13,10 @@
 #include "Ghost_IE.h"
 
 namespace hiperlife {
+    enum class DataLayout {
+    AoS, // Array of Structures: [item0_f0, item0_f1, item1_f0, item1_f1]
+    SoA  // Structure of Arrays: [item0_f0, item1_f0, item0_f1, item1_f1]
+};
 
 template <typename T>
 class GenericFieldStruct : public hiperlife::DistributedClass {
@@ -36,6 +40,8 @@ protected:
     const std::vector<T>* _tmp_distVector{nullptr};
     T* _tmp_distFields{nullptr};
     T* _tmp_globFields{nullptr};
+
+    DataLayout _tmp_layout{DataLayout::AoS};
 
 public:
     GenericFieldStruct(std::string tag, MPI_Comm comm);
@@ -63,13 +69,14 @@ public:
     void setFieldName(int idx, std::string name);
     int getFieldIndex(const std::string& name) const;
 
-    // DATA SETTERS 
-    void setDistFields(T* fields, int locNItem);
-    void setDistFields(const std::vector<T>& fields);
-    void setGlobFields(T* fields);
+
+    void setDistFields(T* fields, int locNItem, DataLayout layout = DataLayout::AoS);
+    void setDistFields(const std::vector<T>& fields, DataLayout layout = DataLayout::AoS);
+    void setGlobFields(T* fields, DataLayout layout = DataLayout::AoS);
+
+    std::vector<T> getDistData(DataLayout layout = DataLayout::AoS) const;
 
     void Update();
-    
 
     bool isItemInPart(int globIdx) const;
     bool isItemInPartGhosts(int globIdx) const;
