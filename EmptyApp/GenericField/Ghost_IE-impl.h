@@ -59,10 +59,7 @@ void GhostIE<T>::setupImportExport(const GhostManager& manager, int numFlds)
 }
 
 template <typename T>
-void GhostIE<T>::communicate(const GhostManager&, 
-                             const std::vector<T>& localData, 
-                             std::vector<T>& ghostData, 
-                             int numFlds) 
+void GhostIE<T>::startCommunication(const GhostManager& manager, const std::vector<T>& localData, int numFlds) 
 {
     if (_exportRanks.empty() && _importRanks.empty()) return;
 
@@ -70,6 +67,7 @@ void GhostIE<T>::communicate(const GhostManager&,
     _requests.resize(numRequests);
     int reqIdx = 0;
 
+    // 1. Post Irecv
     int importOffset = 0;
     for (size_t i = 0; i < _importRanks.size(); ++i) 
     {
@@ -79,6 +77,7 @@ void GhostIE<T>::communicate(const GhostManager&,
         importOffset += count; 
     }
 
+    // 2. Pack Data
     const T* p_localData = localData.data();
     T* p_exportBuffer = _exportBuffer.data();
     const int* p_exportIndices = _exportIndices.data();
@@ -88,6 +87,7 @@ void GhostIE<T>::communicate(const GhostManager&,
         p_exportBuffer[i] = p_localData[p_exportIndices[i]];
     }
 
+    // 3. Post Isend
     int exportOffset = 0;
     for (size_t i = 0; i < _exportRanks.size(); ++i) 
     {
@@ -96,11 +96,20 @@ void GhostIE<T>::communicate(const GhostManager&,
                   _exportRanks[i], 0, this->_comm, &_requests[reqIdx++]);
         exportOffset += count;
     }
+}
 
+template <typename T>
+void GhostIE<T>::completeCommunication(const GhostManager& manager, std::vector<T>& ghostData, int numFlds) 
+{
+    if (_exportRanks.empty() && _importRanks.empty()) return;
+
+    // 4. Wait for all requests to finish
+    int numRequests = _requests.size();
     if (numRequests > 0) {
         MPI_Waitall(numRequests, _requests.data(), MPI_STATUSES_IGNORE);
     }
 
+    // 5. Unpack received data
     const T* p_importBuffer = _importBuffer.data();
     T* p_ghostData = ghostData.data();
     const int* p_importIndices = _importIndices.data();

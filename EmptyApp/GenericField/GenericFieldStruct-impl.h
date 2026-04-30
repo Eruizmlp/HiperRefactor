@@ -133,6 +133,11 @@ void GenericFieldStruct<T>::setGlobFields(T* fields, DataLayout layout) {
 }
 
 template <typename T>
+std::vector<T> GenericFieldStruct<T>::getDistData(DataLayout layout) const {
+    return _data;
+}
+
+template <typename T>
 void GenericFieldStruct<T>::Update() {
     if (!_mapIsSet) { 
         if (_tmp_distVector != nullptr) {
@@ -196,77 +201,73 @@ std::string GenericFieldStruct<T>::tag(int i) const {
 }
 
 template <typename T>
-void GenericFieldStruct<T>::setValue(int fieldIdx, int idx, IndexType type, T value) {
-    if (!_mapIsSet) hiperlife::Abort("Map not initialized.");
-    if (fieldIdx < 0 || fieldIdx >= _numFlds) hiperlife::Abort("Invalid Field Index.");
-
-    if (type == IndexType::Local) {
-        int flatIdx = (idx * _numFlds) + fieldIdx;
-        if (flatIdx >= (int)_data.size()) hiperlife::Abort("Local index out of bounds.");
-        _data[flatIdx] = value;
-        return;
-    }
-
-    if (type == IndexType::Global) {
-        int localIdx = _map.getLocalIndex(idx);
-        if (localIdx != -1) {
-            int flatIdx = (localIdx * _numFlds) + fieldIdx;
-            _data[flatIdx] = value;
-            return;
-        }
-        
-        const auto& ghosts = _ghostManager.getGhosts();
-        auto it = std::lower_bound(ghosts.begin(), ghosts.end(), idx);
-        
-        if (it != ghosts.end() && *it == idx) {
-            int ghostIdx = std::distance(ghosts.begin(), it);
-            int flatIdx = (ghostIdx * _numFlds) + fieldIdx;
-            
-            if (flatIdx >= (int)_ghostData.size()) {
-                 hiperlife::Abort("Writing to unallocated ghost. Call UpdateGhosts first.");
-            }
-            
-            _ghostData[flatIdx] = value; 
-            return;
-        }
-    }
-    hiperlife::Abort("setValue - Global Index " + std::to_string(idx) + " not found locally or in ghosts.");
+inline void GenericFieldStruct<T>::setLocalValue(int fieldIdx, int localIdx, T value) {
+    _data[(localIdx * _numFlds) + fieldIdx] = value;
 }
 
 template <typename T>
-T GenericFieldStruct<T>::getValue(int fieldIdx, int idx, IndexType type) const {
-    if (!_mapIsSet) hiperlife::Abort("Map not initialized.");
-    if (fieldIdx < 0 || fieldIdx >= _numFlds) hiperlife::Abort("Invalid Field Index.");
+inline void GenericFieldStruct<T>::setGlobalValue(int fieldIdx, int globalIdx, T value) {
+    int localIdx = _map.getLocalIndex(globalIdx);
+    if (localIdx != -1) {
+        _data[(localIdx * _numFlds) + fieldIdx] = value;
+        return;
+    }
     
-    if (type == IndexType::Local) {
-        int flatIdx = (idx * _numFlds) + fieldIdx;
-        if (flatIdx >= (int)_data.size()) hiperlife::Abort("Local index out of bounds.");
-        return _data[flatIdx];
+    const auto& ghosts = _ghostManager.getGhosts();
+    auto it = std::lower_bound(ghosts.begin(), ghosts.end(), globalIdx);
+    
+    if (it != ghosts.end() && *it == globalIdx) {
+        int ghostIdx = std::distance(ghosts.begin(), it);
+        _ghostData[(ghostIdx * _numFlds) + fieldIdx] = value;
+        return;
     }
+    
+    hiperlife::Abort("setGlobalValue - Global Index " + std::to_string(globalIdx) + " not found locally or in ghosts.");
+}
 
-    if (type == IndexType::Global) {
-        int localIdx = _map.getLocalIndex(idx);
-        if (localIdx != -1) {
-            int flatIdx = (localIdx * _numFlds) + fieldIdx;
-            return _data[flatIdx];
-        }
-        
-        const auto& ghosts = _ghostManager.getGhosts();
-        auto it = std::lower_bound(ghosts.begin(), ghosts.end(), idx);
-        
-        if (it != ghosts.end() && *it == idx) {
-            int ghostIdx = std::distance(ghosts.begin(), it);
-            int flatIdx = (ghostIdx * _numFlds) + fieldIdx;
-            
-            if (flatIdx >= (int)_ghostData.size()) {
-                hiperlife::Abort("Ghost data not allocated. Call UpdateGhosts first.");
-            }
-            return _ghostData[flatIdx]; 
-        }
+template <typename T>
+inline void GenericFieldStruct<T>::setValue(int fieldIdx, int idx, IndexType type, T value) {
+    if (type == IndexType::Local) {
+        setLocalValue(fieldIdx, idx, value);
+    } else {
+        setGlobalValue(fieldIdx, idx, value);
     }
-    hiperlife::Abort("getValue - Global Index " + std::to_string(idx) + " not found locally or in ghosts.");
+}
+
+template <typename T>
+inline T GenericFieldStruct<T>::getLocalValue(int fieldIdx, int localIdx) const {
+    return _data[(localIdx * _numFlds) + fieldIdx];
+}
+
+template <typename T>
+inline T GenericFieldStruct<T>::getGlobalValue(int fieldIdx, int globalIdx) const {
+    int localIdx = _map.getLocalIndex(globalIdx);
+    if (localIdx != -1) {
+        return _data[(localIdx * _numFlds) + fieldIdx];
+    }
+    
+    const auto& ghosts = _ghostManager.getGhosts();
+    auto it = std::lower_bound(ghosts.begin(), ghosts.end(), globalIdx);
+    
+    if (it != ghosts.end() && *it == globalIdx) {
+        int ghostIdx = std::distance(ghosts.begin(), it);
+        return _ghostData[(ghostIdx * _numFlds) + fieldIdx];
+    }
+    
+    hiperlife::Abort("getGlobalValue - Global Index " + std::to_string(globalIdx) + " not found locally or in ghosts.");
     return T(); 
 }
+
+template <typename T>
+inline T GenericFieldStruct<T>::getValue(int fieldIdx, int idx, IndexType type) const {
+    if (type == IndexType::Local) {
+        return getLocalValue(fieldIdx, idx);
+    } else {
+        return getGlobalValue(fieldIdx, idx);
+    }
+}
+
+
 template <typename T>
 void GenericFieldStruct<T>::_performScatter() {
     std::vector<int> counts = _map.getCounts(); 
@@ -285,7 +286,7 @@ void GenericFieldStruct<T>::_performScatter() {
                      0, this->_comm);
     } 
     else {
-        std::vector<T> recvBuffer(nLoc); // Temp buffer for a single field
+        std::vector<T> recvBuffer(nLoc); 
         int totalGlobalItems = _map.nItem();
 
         for (int f = 0; f < _numFlds; ++f) {
@@ -311,4 +312,4 @@ void GenericFieldStruct<T>::_performScatter() {
 }
 };
 
-#endif 
+#endif
