@@ -26,14 +26,11 @@ namespace hiperlife {
         }
     }
 
-    // --- Conversiones 
-
     int BlockMap::getLocalIndex(int globalIdx) const {
         if (_offs_nItem.empty()) return -1;
         int start = _offs_nItem[_myRank];
         int end   = start + _loc_nItem;
         
-        // Si está en mi rango, devuelvo el local. Si no, -1.
         if (globalIdx >= start && globalIdx < end) {
             return globalIdx - start;
         }
@@ -58,7 +55,6 @@ namespace hiperlife {
         auto it = std::upper_bound(_offs_nItem.begin(), _offs_nItem.end(), globIdx);        
         int rank = std::distance(_offs_nItem.begin(), it) - 1;
         
-        // Seguridad extra
         if (rank < 0) rank = 0;
         if (rank >= _numProcs) rank = _numProcs - 1;
         

@@ -4,35 +4,22 @@
 namespace hiperlife {
 
 template <typename T>
-GenericFieldStruct<T>::GenericFieldStruct(std::string tag, MPI_Comm comm) 
-    : DistributedClass(tag, comm), 
-      _map(tag + "_map", comm), 
-      _ghostManager(tag + "_ghostManager", comm) ,
-      _ghostIE(tag + "_ghostIE", comm)
+GenericFieldStruct<T>::GenericFieldStruct(std::string tag, MPI_Comm comm)
+     : DistributedClass(tag, comm),
+       _map(tag + "_map", comm),
+       _ghostManager(tag + "_ghostManager", comm) ,
+       _ghostIE(tag + "_ghostIE", comm)
 {
     _fieldTags.resize(_numFlds, "Var");
 }
 
-template <typename T>
-int GenericFieldStruct<T>::nItem() const { return _map.nItem(); }
-
-template <typename T>
-int GenericFieldStruct<T>::loc_nItem() const { return _map.loc_nItem(); }
-
-template <typename T>
-int GenericFieldStruct<T>::myOffset() const { return _map.myOffset(); }
-
-template <typename T>
-int GenericFieldStruct<T>::myRank() const { return this->_myRank; }
-
-template <typename T>
-int GenericFieldStruct<T>::numProcs() const { return this->_numProcs; }
-
-template <typename T>
-int GenericFieldStruct<T>::numFlds() const { return _numFlds; }
-
-template <typename T>
-GhostManager& GenericFieldStruct<T>::ghostManager() { return _ghostManager; }
+template <typename T> int GenericFieldStruct<T>::nItem() const { return _map.nItem(); }
+template <typename T> int GenericFieldStruct<T>::loc_nItem() const { return _map.loc_nItem(); }
+template <typename T> int GenericFieldStruct<T>::myOffset() const { return _map.myOffset(); }
+template <typename T> int GenericFieldStruct<T>::myRank() const { return this->_myRank; }
+template <typename T> int GenericFieldStruct<T>::numProcs() const { return this->_numProcs; }
+template <typename T> int GenericFieldStruct<T>::numFlds() const { return _numFlds; }
+template <typename T> GhostManager& GenericFieldStruct<T>::ghostManager() { return _ghostManager; }
 
 template <typename T>
 void GenericFieldStruct<T>::UpdateGhosts(const std::vector<int>& candidates) {
@@ -42,13 +29,13 @@ void GenericFieldStruct<T>::UpdateGhosts(const std::vector<int>& candidates) {
 
     _ghostData.resize(_ghostManager.getGhosts().size() * _numFlds);
     _ghostIE.setupImportExport(_ghostManager, _numFlds);
-    
+
     UpdateGhosts();
 }
 
 template <typename T>
 void GenericFieldStruct<T>::UpdateGhosts() {
-    _ghostIE.communicate(_ghostManager, _data, _ghostData, _numFlds);
+    _ghostIE.startCommunication(_ghostManager, _data, _ghostData, _numFlds);
 }
 
 template <typename T>
@@ -140,14 +127,7 @@ std::vector<T> GenericFieldStruct<T>::getDistData(DataLayout layout) const {
 template <typename T>
 void GenericFieldStruct<T>::Update() {
     if (!_mapIsSet) { 
-        if (_tmp_distVector != nullptr) {
-            int inferredSize = _tmp_distVector->size();
-            if (_numFlds > 0) inferredSize /= _numFlds;
-            _map.setLocNItem(inferredSize);
-        }
-        _map.Update(); 
-        _mapIsSet = true;
-        _ghostManager.setBlockMap(_map);
+        hiperlife::Abort("BlockMap has not been set. Use setBlockMap() before calling Update().");
     }
 
     const int nLoc = _map.loc_nItem(); 
@@ -175,7 +155,10 @@ void GenericFieldStruct<T>::Update() {
     }
     else if (_tmp_distVector != nullptr) {
          if ((int)_tmp_distVector->size() != totalSize) {
-             hiperlife::Abort("GenericFieldStruct: Vector size mismatch in Update().");
+             hiperlife::Abort("Dimension mismatch. Input vector size is " + 
+                              std::to_string(_tmp_distVector->size()) + 
+                              ", but expected locNItem (" + std::to_string(nLoc) + 
+                              ") * numFlds (" + std::to_string(_numFlds) + ") = " + std::to_string(totalSize) + ".");
          }
          packToAoS(_tmp_distVector->data());
     }
@@ -267,49 +250,40 @@ inline T GenericFieldStruct<T>::getValue(int fieldIdx, int idx, IndexType type) 
     }
 }
 
-
 template <typename T>
 void GenericFieldStruct<T>::_performScatter() {
     std::vector<int> counts = _map.getCounts(); 
     std::vector<int> offsets = _map.getOffsets(); 
-    int nLoc = _map.loc_nItem();
 
-    if (_tmp_layout == DataLayout::AoS) {
-        int nodeBlockSize = _numFlds * sizeof(T);
-        for(auto& c : counts) c *= nodeBlockSize;
-        for(auto& o : offsets) o *= nodeBlockSize;
+    int nodeBlockSize = _numFlds * sizeof(T);
 
-        const void* sendbuf = (this->_myRank == 0) ? reinterpret_cast<const void*>(_tmp_globFields) : nullptr;
-        
-        MPI_Scatterv(sendbuf, counts.data(), offsets.data(), MPI_BYTE, 
-                     _data.data(), nLoc * nodeBlockSize, MPI_BYTE, 
-                     0, this->_comm);
-    } 
-    else {
-        std::vector<T> recvBuffer(nLoc); 
-        int totalGlobalItems = _map.nItem();
+    for(auto& c : counts) c *= nodeBlockSize;
+    for(auto& o : offsets) o *= nodeBlockSize;
 
-        for (int f = 0; f < _numFlds; ++f) {
-            const T* sendbuf = nullptr;
-            if (this->_myRank == 0) {
-                sendbuf = _tmp_globFields + (f * totalGlobalItems);
-            }
+    int nLocBytes = _map.loc_nItem() * nodeBlockSize; 
 
-            std::vector<int> fieldCounts = counts;
-            std::vector<int> fieldOffsets = offsets;
-            for(auto& c : fieldCounts) c *= sizeof(T);
-            for(auto& o : fieldOffsets) o *= sizeof(T);
-
-            MPI_Scatterv(sendbuf, fieldCounts.data(), fieldOffsets.data(), MPI_BYTE, 
-                         recvBuffer.data(), nLoc * sizeof(T), MPI_BYTE, 
-                         0, this->_comm);
-
-            for (int i = 0; i < nLoc; ++i) {
-                _data[i * _numFlds + f] = recvBuffer[i];
-            }
+    const void* sendbuf = nullptr;
+    if (this->_myRank == 0) {
+        if (_tmp_globFields == nullptr) {
+            hiperlife::Abort("Rank 0: Global data pointer is null in _performScatter.");
         }
+        sendbuf = reinterpret_cast<const void*>(_tmp_globFields);
     }
-}
-};
 
+    void* recvbuf = reinterpret_cast<void*>(_data.data());
+
+    MPI_Scatterv(
+        sendbuf,            
+        counts.data(),      
+        offsets.data(),     
+        MPI_BYTE,           
+        recvbuf,            
+        nLocBytes,          
+        MPI_BYTE,           
+        0,                  
+        this->_comm               
+    );
+}
+
+} 
 #endif

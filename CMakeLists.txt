@@ -64,5 +64,5 @@ set(PROJECT_INSTALL_PATH ${CMAKE_INSTALL_PREFIX})
 include_directories(${hiperlife_INCLUDE_DIR})
 
 #Add (or modify) applications that do not depend on vtk and gmsh here:
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/EmptyApp)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/HiperlifePrototype)
 
